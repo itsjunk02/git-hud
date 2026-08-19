@@ -5,6 +5,7 @@ import {
   GitMerge,
   Settings as SettingsIcon,
   Users,
+  X,
 } from "lucide-react";
 
 import type { View } from "../lib/views";
@@ -27,11 +28,13 @@ export function Sidebar({
   onNavigate,
   repo,
   onOpenRepo,
+  onCloseRepo,
 }: {
   view: View;
   onNavigate: (view: View) => void;
   repo: RepoSummary | null;
   onOpenRepo: () => void;
+  onCloseRepo: () => void;
 }) {
   return (
     <aside className="flex h-full w-60 flex-col border-r border-zinc-800 bg-zinc-900/60">
@@ -46,8 +49,18 @@ export function Sidebar({
       <div className="mx-3 mb-3 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
         {repo ? (
           <>
-            <div className="truncate text-sm font-medium text-zinc-100">
-              {repoName(repo.path)}
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-100">
+                {repoName(repo.path)}
+              </div>
+              <button
+                onClick={onCloseRepo}
+                title="Close repository"
+                aria-label="Close repository"
+                className="-mr-1 -mt-0.5 shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
               <GitBranch className="h-3 w-3" />

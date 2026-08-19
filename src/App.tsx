@@ -23,7 +23,7 @@ const TITLES: Record<View, string> = {
 };
 
 function App() {
-  const { repo, error, pickAndOpen } = useRepository();
+  const { repo, error, pickAndOpen, closeRepo } = useRepository();
   const [view, setView] = useState<View>("timeline");
   const [selected, setSelected] = useState<CommitInfo | null>(null);
 
@@ -38,7 +38,17 @@ function App() {
   return (
     <RadixTooltip.Provider delayDuration={300}>
       <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
-        <Sidebar view={view} onNavigate={setView} repo={repo} onOpenRepo={pickAndOpen} />
+        <Sidebar
+          view={view}
+          onNavigate={setView}
+          repo={repo}
+          onOpenRepo={pickAndOpen}
+          onCloseRepo={() => {
+            setSelected(null);
+            setView("timeline");
+            void closeRepo();
+          }}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col">
           {!repo ? (

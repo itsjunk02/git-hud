@@ -37,6 +37,13 @@ export function useRepository() {
     if (typeof selected === "string") await openPath(selected);
   }, [openPath]);
 
+  const closeRepo = useCallback(async () => {
+    setRepo(null);
+    setError(null);
+    // Forget the persisted repo so it doesn't auto-reopen on next launch.
+    await ipc.setConfig(LAST_REPO_KEY, "").catch(() => undefined);
+  }, []);
+
   // Restore the last-opened repo once, on mount.
   useEffect(() => {
     (async () => {
@@ -49,5 +56,5 @@ export function useRepository() {
     })();
   }, [openPath]);
 
-  return { repo, loading, error, openPath, pickAndOpen };
+  return { repo, loading, error, openPath, pickAndOpen, closeRepo };
 }
