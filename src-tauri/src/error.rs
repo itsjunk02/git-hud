@@ -23,9 +23,6 @@ pub enum AppError {
 
     #[error("no repository is currently open")]
     NoRepo,
-
-    #[error("{0}")]
-    Other(String),
 }
 
 /// Serialize as a plain message string for transport to the frontend.
