@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core capabilities for the git-hud main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "opener:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "notification:default"
+  ]
+}
