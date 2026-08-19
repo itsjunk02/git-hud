@@ -3,6 +3,7 @@
 use rusqlite::{params, Connection};
 
 use crate::engine::model::CommitInfo;
+use crate::engine::remote::CiStatus;
 use crate::error::AppResult;
 
 /// Insert the repo (or bump its `last_opened`) and return its row id.
@@ -38,6 +39,30 @@ pub fn cache_commits(conn: &Connection, repo_id: i64, commits: &[CommitInfo]) ->
                 c.author_email,
                 c.timestamp,
                 c.lane,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Persist the latest CI/compliance poll for a repo (with its real `updated_at`), so the
+/// dashboard can fall back to and show the age of the last-known status.
+pub fn upsert_ci_status(conn: &Connection, repo_id: i64, rows: &[CiStatus]) -> AppResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR REPLACE INTO ci_status
+                (repo_id, pipeline, status, badge, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for r in rows {
+            stmt.execute(params![
+                repo_id,
+                r.pipeline,
+                r.status,
+                r.badge,
+                r.updated_at as i64,
             ])?;
         }
     }

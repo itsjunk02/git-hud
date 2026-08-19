@@ -144,12 +144,24 @@ fn contributor_stats(
     engine::stats::contributor_stats(&path).map_err(|e| e.to_string())
 }
 
-/// CI/CD + compliance badges for the active repo (stubbed poll).
+/// CI/CD + compliance badges for the active repo: real DCO from local commit trailers +
+/// build/test from the GitHub Checks API (via `gh`). The poll is persisted to the local
+/// cache with a real `updated_at` before returning.
 #[tauri::command]
 #[specta::specta]
 fn get_ci_status(state: tauri::State<'_, AppState>) -> Result<Vec<CiStatus>, String> {
     let path = require_repo(&state)?;
-    Ok(engine::remote::poll_ci(&path))
+    let statuses = engine::remote::poll_ci(&path);
+
+    // Best-effort cache write — a failed persist must not fail the read.
+    {
+        let conn = state.db.lock().unwrap();
+        if let Ok(repo_id) = db::cache::upsert_repo(&conn, &path) {
+            let _ = db::cache::upsert_ci_status(&conn, repo_id, &statuses);
+        }
+    }
+
+    Ok(statuses)
 }
 
 /// Read a persisted user-config value (custom filters, aliases, groupings, …).

@@ -175,6 +175,71 @@ pub fn status(path: &str) -> AppResult<RepoStatus> {
     })
 }
 
+/// URL of the named remote (e.g. `origin`), if the remote exists and has one.
+pub fn remote_url(path: &str, remote: &str) -> AppResult<Option<String>> {
+    let repo = open(path)?;
+    // Bind the owned String before the block ends so the borrowed `Remote` can drop.
+    let url = match repo.find_remote(remote) {
+        // `url()` errors on non-UTF-8 URLs; treat that like an absent URL.
+        Ok(r) => r.url().ok().map(str::to_string),
+        // A missing remote is a normal state, not an error the caller must handle.
+        Err(_) => None,
+    };
+    Ok(url)
+}
+
+/// Full 40-char OID of the current HEAD commit.
+pub fn head_sha(path: &str) -> AppResult<String> {
+    let repo = open(path)?;
+    let commit = repo.head()?.peel_to_commit()?;
+    Ok(commit.id().to_string())
+}
+
+/// Result of a DCO scan: how many commits were checked and how many carry a signoff.
+#[derive(Debug, Clone, Copy)]
+pub struct DcoReport {
+    pub checked: usize,
+    pub signed: usize,
+}
+
+impl DcoReport {
+    /// Every checked commit is signed (and at least one was checked).
+    pub fn is_compliant(&self) -> bool {
+        self.checked > 0 && self.signed == self.checked
+    }
+}
+
+/// Does a commit message carry a well-formed `Signed-off-by:` trailer (the DCO convention:
+/// a name plus an `<email>`)? Case-sensitive on the prefix, matching the DCO spec.
+fn commit_has_signoff(msg: &str) -> bool {
+    msg.lines().any(|line| {
+        let line = line.trim();
+        line.starts_with("Signed-off-by:")
+            && line.contains('<')
+            && line.contains('@')
+            && line.contains('>')
+    })
+}
+
+/// DCO scan: walk up to `limit` commits reachable from HEAD and count how many carry a
+/// valid `Signed-off-by:` trailer. Fully local — no network, no CLI subprocess.
+pub fn dco_report(path: &str, limit: usize) -> AppResult<DcoReport> {
+    let repo = open(path)?;
+    let mut walk = repo.revwalk()?;
+    walk.push_head()?;
+
+    let mut checked = 0usize;
+    let mut signed = 0usize;
+    for oid in walk.take(limit) {
+        let commit = repo.find_commit(oid?)?;
+        checked += 1;
+        if commit.message().map(commit_has_signoff).unwrap_or(false) {
+            signed += 1;
+        }
+    }
+    Ok(DcoReport { checked, signed })
+}
+
 /// Map a `git2::Status` bitset to a human label and a "staged?" flag.
 fn describe_status(s: git2::Status) -> (String, bool) {
     use git2::Status as St;
@@ -252,6 +317,59 @@ mod tests {
 
         let status = super::status(path).unwrap();
         assert!(!status.has_conflicts);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn signoff_detection_matches_dco_spec() {
+        assert!(super::commit_has_signoff(
+            "feat: thing\n\nSigned-off-by: Jane Dev <jane@example.com>"
+        ));
+        // Co-authored-by is NOT a DCO signoff.
+        assert!(!super::commit_has_signoff(
+            "feat: thing\n\nCo-Authored-By: Bot <bot@example.com>"
+        ));
+        // Prefix present but no email — malformed, not a valid signoff.
+        assert!(!super::commit_has_signoff("fix\n\nSigned-off-by: Jane Dev"));
+        assert!(!super::commit_has_signoff("plain message, no trailer"));
+    }
+
+    #[test]
+    fn dco_report_counts_signed_and_unsigned() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("githud-dco-{unique}"));
+        let repo = git2::Repository::init(&dir).unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+
+        let commit_file = |name: &str, msg: &str, parents: &[git2::Oid]| -> git2::Oid {
+            std::fs::write(dir.join(name), name).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new(name)).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parent_commits: Vec<git2::Commit> =
+                parents.iter().map(|o| repo.find_commit(*o).unwrap()).collect();
+            let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parent_refs)
+                .unwrap()
+        };
+
+        let first = commit_file(
+            "a.txt",
+            "first\n\nSigned-off-by: Test User <test@example.com>",
+            &[],
+        );
+        commit_file("b.txt", "second, unsigned", &[first]);
+
+        let path = dir.to_str().unwrap();
+        let report = super::dco_report(path, 100).unwrap();
+        assert_eq!(report.checked, 2);
+        assert_eq!(report.signed, 1);
+        assert!(!report.is_compliant());
 
         std::fs::remove_dir_all(&dir).ok();
     }

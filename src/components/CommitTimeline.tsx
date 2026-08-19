@@ -175,29 +175,31 @@ export function CommitTimeline({
     return Math.floor((e.clientY - rect.top) / ROW_H);
   };
 
-  if (commits.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-        No commits to display.
-      </div>
-    );
-  }
-
+  // The ref'd container must mount on every render — including while commits are
+  // still loading — so the width-measuring ResizeObserver in useLayoutEffect always
+  // attaches. Early-returning an empty state here would skip the ref on first mount,
+  // leaving width=0 and draw() a no-op until a remount (e.g. switching tabs and back).
   return (
     <div ref={containerRef} className="h-full overflow-auto">
-      <canvas
-        ref={canvasRef}
-        onMouseMove={(e) => {
-          const i = indexFromEvent(e);
-          setHovered(i >= 0 && i < commits.length ? i : null);
-        }}
-        onMouseLeave={() => setHovered(null)}
-        onClick={(e) => {
-          const i = indexFromEvent(e);
-          if (i >= 0 && i < commits.length) onSelect(commits[i]);
-        }}
-        className="block cursor-pointer"
-      />
+      {commits.length === 0 ? (
+        <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+          No commits to display.
+        </div>
+      ) : (
+        <canvas
+          ref={canvasRef}
+          onMouseMove={(e) => {
+            const i = indexFromEvent(e);
+            setHovered(i >= 0 && i < commits.length ? i : null);
+          }}
+          onMouseLeave={() => setHovered(null)}
+          onClick={(e) => {
+            const i = indexFromEvent(e);
+            if (i >= 0 && i < commits.length) onSelect(commits[i]);
+          }}
+          className="block cursor-pointer"
+        />
+      )}
     </div>
   );
 }

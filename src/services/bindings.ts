@@ -23,7 +23,11 @@ export const commands = {
 	resolveConflict: (file: string, resolution: string) => typedError<null, string>(__TAURI_INVOKE("resolve_conflict", { file, resolution })),
 	/**  "Who Did What" contributor metrics for the active repo. */
 	contributorStats: () => typedError<ContributorStat[], string>(__TAURI_INVOKE("contributor_stats")),
-	/**  CI/CD + compliance badges for the active repo (stubbed poll). */
+	/**
+	 *  CI/CD + compliance badges for the active repo: real DCO from local commit trailers +
+	 *  build/test from the GitHub Checks API (via `gh`). The poll is persisted to the local
+	 *  cache with a real `updated_at` before returning.
+	 */
 	getCiStatus: () => typedError<CiStatus[], string>(__TAURI_INVOKE("get_ci_status")),
 	/**  Read a persisted user-config value (custom filters, aliases, groupings, …). */
 	getConfig: (key: string) => typedError<string | null, string>(__TAURI_INVOKE("get_config", { key })),
@@ -43,11 +47,14 @@ export type BranchInfo = {
 
 export type CiStatus = {
 	pipeline: string,
-	/**  e.g. `success`, `failed`, `running`, `verified`. */
+	/**
+	 *  Canonical state the UI keys its icon off: `success`, `failed`, `running`,
+	 *  `verified`, `unsigned`, or `unknown`.
+	 */
 	status: string,
-	/**  Short badge label surfaced in the UI, e.g. `passing`, `compliant`. */
+	/**  Short badge label surfaced in the UI, e.g. `passing`, `compliant`, `3/4 signed`. */
 	badge: string,
-	/**  Unix epoch seconds of last update (0 in the scaffold). */
+	/**  Unix epoch seconds of when this status was computed. */
 	updated_at: number | null,
 };
 
