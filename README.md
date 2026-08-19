@@ -19,14 +19,14 @@ React/Canvas frontend.
 
 ## ✨ Features
 
-| Hook stage | Feature | Status in this build |
-| --- | --- | --- |
-| **Trigger** | OS tray HUD + `.git` file-watcher + background CI/CD poll emitting ambient change events | ✅ Wired end-to-end |
-| **Action** | High-performance Canvas **commit & branch timeline** (real `git2` data, DPR-aware) | ✅ Real |
-| **Action** | 1-click **Merge Conflict Editor** with side-by-side split diff | ✅  Detection real; content/resolution  |
-| **Reward** | **"Who Did What"** collaboration dashboard (ownership by commit attribution) |  Commit attribution real; ownership/reviews stubbed |
-| **Reward** | CI/CD pipeline health + DCO/CLA compliance badges | 🔶 Stubbed poll |
-| **Investment** | Repo aliases, filters & config persisted in local SQLite so the app compounds over time | ✅ Real |
+ Feature | Status in this build |
+|  --- | --- |
+|  OS tray HUD + `.git` file-watcher + background CI/CD poll emitting ambient change events | ✅ Wired end-to-end |
+|  High-performance Canvas **commit & branch timeline** (real `git2` data, DPR-aware) | ✅ Real |
+|  1-click **Merge Conflict Editor** with side-by-side split diff | ✅  Detection real; content/resolution  |
+|  collaboration dashboard (ownership by commit attribution) |  Commit attribution real; ownership/reviews stubbed |
+|  CI/CD pipeline health + DCO/CLA compliance badges | 🔶 Stubbed poll |
+|  Repo aliases, filters & config persisted in local SQLite so the app compounds over time | ✅ Real |
 
 > This repository is an **initialized scaffold**: the full architecture, type-safe IPC,
 > and background workers are in place and compiling. The commit timeline is a complete
