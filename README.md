@@ -15,8 +15,7 @@ Built with **Tauri v2** · **Rust** (`git2` + SQLite) · **React 19 + TypeScript
 git-hud is a desktop Git GUI that treats your repositories as a live heads-up display.
 A background Rust engine parses Git directly through `libgit2` (no shelling out to the
 `git` CLI), caches derived metrics in local SQLite, and streams change events to a
-React/Canvas frontend. The product is organized around Nir Eyal's **Hook Model**
-(Trigger → Action → Reward → Investment) so it becomes more useful the more you use it.
+React/Canvas frontend. 
 
 ## ✨ Features
 
