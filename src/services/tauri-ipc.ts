@@ -14,9 +14,12 @@ import type {
   CommitInfo,
   ConflictHunk,
   ContributorStat,
+  FetchStatus,
   FileStatus,
+  ProjectStatus,
   RepoStatus,
   RepoSummary,
+  ReviewerStat,
 } from "./bindings";
 
 export type {
@@ -25,9 +28,12 @@ export type {
   CommitInfo,
   ConflictHunk,
   ContributorStat,
+  FetchStatus,
   FileStatus,
+  ProjectStatus,
   RepoStatus,
   RepoSummary,
+  ReviewerStat,
 };
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -42,15 +48,24 @@ async function unwrap<T>(promise: Promise<Result<T>>): Promise<T> {
 /** Value-or-throw view over every backend command. */
 export const ipc = {
   openRepository: (path: string) => unwrap(commands.openRepository(path)),
+  listOpenRepos: () => unwrap(commands.listOpenRepos()),
+  setActiveRepo: (path: string) => unwrap(commands.setActiveRepo(path)),
+  closeRepository: (path: string) => unwrap(commands.closeRepository(path)),
   currentRepo: () => unwrap(commands.currentRepo()),
   listCommits: (limit: number) => unwrap(commands.listCommits(limit)),
+  githubRepoUrl: () => unwrap(commands.githubRepoUrl()),
   listBranches: () => unwrap(commands.listBranches()),
   getStatus: () => unwrap(commands.getStatus()),
   listConflicts: () => unwrap(commands.listConflicts()),
   resolveConflict: (file: string, resolution: string) =>
     unwrap(commands.resolveConflict(file, resolution)),
+  saveConflictResolution: (file: string, content: string) =>
+    unwrap(commands.saveConflictResolution(file, content)),
   contributorStats: () => unwrap(commands.contributorStats()),
+  reviewStats: () => unwrap(commands.reviewStats()),
   getCiStatus: () => unwrap(commands.getCiStatus()),
+  fetchStatus: (path: string) => unwrap(commands.fetchStatus(path)),
+  fetchNow: (path: string) => unwrap(commands.fetchNow(path)),
   getConfig: (key: string) => unwrap(commands.getConfig(key)),
   setConfig: (key: string, value: string) => unwrap(commands.setConfig(key, value)),
 };

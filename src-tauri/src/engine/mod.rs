@@ -5,5 +5,7 @@ pub mod conflicts;
 pub mod git;
 pub mod model;
 pub mod remote;
+pub mod reviews;
 pub mod stats;
+pub mod sync;
 pub mod watcher;

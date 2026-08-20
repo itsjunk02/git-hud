@@ -107,16 +107,24 @@ fn github_checks(path: &str, now: f64) -> Vec<CiStatus> {
         if runs.is_empty() {
             return unknown("no checks");
         }
-        return runs
+        // GitHub returns one check run per job/matrix-leg/re-run, so the same name can
+        // repeat many times (e.g. six "Dependabot" runs). Classify each, then roll up by
+        // name into one card per pipeline (worst status wins, with a count).
+        let classified: Vec<(String, &str, &str)> = runs
             .iter()
             .map(|run| {
-                let name = run.get("name").and_then(|v| v.as_str()).unwrap_or("check");
+                let name = run
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("check")
+                    .to_string();
                 let run_status = run.get("status").and_then(|v| v.as_str()).unwrap_or("");
                 let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("");
-                let (status, badge) = classify_check(run_status, conclusion);
-                CiStatus::new(name, status, badge, now)
+                let (kind, badge) = classify_check(run_status, conclusion);
+                (name, kind, badge)
             })
             .collect();
+        return aggregate_checks(classified, now);
     }
 
     // Error object, e.g. 404 "Not Found" when HEAD isn't pushed to the remote. Surface the
@@ -158,6 +166,64 @@ fn conclusion_label(conclusion: &str) -> &'static str {
     }
 }
 
+/// Roll up classified check runs into one [`CiStatus`] per distinct name, preserving
+/// first-seen order. Status precedence within a group: failed > running > unknown > success.
+/// A single-run group keeps its own badge; a multi-run group summarizes (e.g.
+/// `1 failing of 6`, `2 running of 3`, `5 passing`).
+fn aggregate_checks(runs: Vec<(String, &str, &str)>, now: f64) -> Vec<CiStatus> {
+    use std::collections::HashMap;
+
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for (name, kind, badge) in runs {
+        if !groups.contains_key(&name) {
+            order.push(name.clone());
+        }
+        groups
+            .entry(name)
+            .or_default()
+            .push((kind.to_string(), badge.to_string()));
+    }
+
+    order
+        .into_iter()
+        .map(|name| {
+            let items = &groups[&name];
+            let total = items.len();
+            let count = |k: &str| items.iter().filter(|(kind, _)| kind == k).count();
+            let (failing, running, unknown) = (count("failed"), count("running"), count("unknown"));
+            let single = items[0].1.as_str();
+
+            let (status, badge) = if failing > 0 {
+                ("failed", rollup_badge(total, failing, "failing", single))
+            } else if running > 0 {
+                ("running", rollup_badge(total, running, "running", single))
+            } else if unknown > 0 {
+                ("unknown", rollup_badge(total, unknown, "unknown", single))
+            } else {
+                (
+                    "success",
+                    if total == 1 {
+                        single.to_string()
+                    } else {
+                        format!("{total} passing")
+                    },
+                )
+            };
+            CiStatus::new(&name, status, badge, now)
+        })
+        .collect()
+}
+
+/// A single run keeps its own badge; multiple runs summarize the notable count.
+fn rollup_badge(total: usize, count: usize, word: &str, single_badge: &str) -> String {
+    if total == 1 {
+        single_badge.to_string()
+    } else {
+        format!("{count} {word} of {total}")
+    }
+}
+
 /// Invoke `gh api` for the check runs of a commit and return its stdout (which is JSON on
 /// both success and API errors, so the caller can read the reason). Returns `None` only
 /// when `gh` cannot be spawned at all (not installed).
@@ -172,7 +238,7 @@ fn gh_check_runs(owner: &str, repo: &str, sha: &str) -> Option<String> {
 
 /// Parse `(owner, repo)` from a GitHub remote URL. Handles the common HTTPS and SSH forms;
 /// returns `None` for non-GitHub hosts.
-fn parse_github_slug(url: &str) -> Option<(String, String)> {
+pub fn parse_github_slug(url: &str) -> Option<(String, String)> {
     let url = url.trim();
     // Locate the part after the github.com host, for either `:` (scp-like) or `/` forms.
     let after_host = if let Some(rest) = url.strip_prefix("git@github.com:") {
@@ -227,6 +293,42 @@ mod tests {
         assert!(parse_github_slug("git@gitlab.com:group/proj.git").is_none());
         assert!(parse_github_slug("https://bitbucket.org/team/repo.git").is_none());
         assert!(parse_github_slug("not a url").is_none());
+    }
+
+    #[test]
+    fn groups_repeated_check_names_worst_status_wins() {
+        // Six "Dependabot" runs (5 pass, 1 fail) + one single "Rust service".
+        let runs = vec![
+            ("Dependabot".to_string(), "success", "passing"),
+            ("Dependabot".to_string(), "success", "passing"),
+            ("Dependabot".to_string(), "failed", "failing"),
+            ("Rust service".to_string(), "success", "passing"),
+            ("Dependabot".to_string(), "success", "passing"),
+            ("Dependabot".to_string(), "success", "passing"),
+            ("Dependabot".to_string(), "success", "passing"),
+        ];
+        let out = aggregate_checks(runs, 0.0);
+        assert_eq!(out.len(), 2, "grouped into 2 cards");
+
+        let dep = out.iter().find(|s| s.pipeline == "Dependabot").unwrap();
+        assert_eq!(dep.status, "failed"); // one failure poisons the group
+        assert_eq!(dep.badge, "1 failing of 6");
+
+        let rust = out.iter().find(|s| s.pipeline == "Rust service").unwrap();
+        assert_eq!(rust.status, "success");
+        assert_eq!(rust.badge, "passing"); // single run keeps its own label
+    }
+
+    #[test]
+    fn all_passing_group_shows_count() {
+        let runs = vec![
+            ("Lint".to_string(), "success", "passing"),
+            ("Lint".to_string(), "success", "neutral"),
+        ];
+        let out = aggregate_checks(runs, 0.0);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].status, "success");
+        assert_eq!(out[0].badge, "2 passing");
     }
 
     #[test]

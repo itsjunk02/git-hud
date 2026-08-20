@@ -50,9 +50,11 @@ pub fn list_commits(path: &str, limit: usize) -> AppResult<Vec<CommitInfo>> {
     let mut walk = repo.revwalk()?;
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
 
-    // Seed the walk with HEAD and every local branch tip so parallel branches are visible.
+    // Seed the walk with HEAD and every branch tip — local AND remote-tracking — so
+    // parallel branches and commits fetched from the remote (e.g. new commits pushed on
+    // the web) are visible in the graph even before they're merged into a local branch.
     let _ = walk.push_head();
-    if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
+    if let Ok(branches) = repo.branches(None) {
         for branch in branches.flatten() {
             if let Some(oid) = branch.0.get().target() {
                 let _ = walk.push(oid);
@@ -166,13 +168,42 @@ pub fn status(path: &str) -> AppResult<RepoStatus> {
         });
     }
 
+    let (ahead, behind) = ahead_behind(&repo).unwrap_or((0, 0));
+
     Ok(RepoStatus {
         head_branch,
         files,
-        ahead: 0,
-        behind: 0,
+        ahead,
+        behind,
         has_conflicts,
     })
+}
+
+/// Commits the current branch is ahead / behind its remote counterpart. Prefers the
+/// configured upstream, falling back to `origin/<branch>`. Returns `None` when there's no
+/// branch checked out or no remote-tracking ref to compare against — the caller treats
+/// that as `(0, 0)`. The `behind` count is how "changes made on the web" surface: after a
+/// background fetch, a commit pushed remotely shows up here as `behind: N`.
+fn ahead_behind(repo: &Repository) -> Option<(u32, u32)> {
+    let head_ref = repo.head().ok()?;
+    if !head_ref.is_branch() {
+        return None; // detached HEAD — nothing to track.
+    }
+    let local_oid = head_ref.target()?;
+    let branch_name = head_ref.shorthand().ok()?.to_string();
+
+    let local_branch = repo.find_branch(&branch_name, BranchType::Local).ok()?;
+    let remote_oid = local_branch
+        .upstream()
+        .ok()
+        .and_then(|up| up.get().target())
+        .or_else(|| {
+            repo.refname_to_id(&format!("refs/remotes/origin/{branch_name}"))
+                .ok()
+        })?;
+
+    let (ahead, behind) = repo.graph_ahead_behind(local_oid, remote_oid).ok()?;
+    Some((ahead as u32, behind as u32))
 }
 
 /// URL of the named remote (e.g. `origin`), if the remote exists and has one.
@@ -317,6 +348,47 @@ mod tests {
 
         let status = super::status(path).unwrap();
         assert!(!status.has_conflicts);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ahead_behind_tracks_remote() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("githud-ab-{unique}"));
+        let repo = git2::Repository::init(&dir).unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+
+        let commit_file = |name: &str, parents: &[git2::Oid]| -> git2::Oid {
+            std::fs::write(dir.join(name), name).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new(name)).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parent_commits: Vec<git2::Commit> =
+                parents.iter().map(|o| repo.find_commit(*o).unwrap()).collect();
+            let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &parent_refs)
+                .unwrap()
+        };
+
+        let a = commit_file("a.txt", &[]);
+        let b = commit_file("b.txt", &[a]);
+
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        // Simulate the remote being one commit ahead (a web push): origin/<branch> -> b,
+        // while the local branch stays at a.
+        repo.reference(&format!("refs/remotes/origin/{branch}"), b, true, "set origin")
+            .unwrap();
+        repo.reference(&format!("refs/heads/{branch}"), a, true, "rewind local")
+            .unwrap();
+
+        let status = super::status(dir.to_str().unwrap()).unwrap();
+        assert_eq!(status.behind, 1, "local should be 1 behind origin");
+        assert_eq!(status.ahead, 0, "local should be 0 ahead");
 
         std::fs::remove_dir_all(&dir).ok();
     }

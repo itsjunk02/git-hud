@@ -5,30 +5,58 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	/**
-	 *  Open a repository: summarize it, persist + cache it, mark it active, and start
-	 *  watching its `.git` dir for ambient change triggers.
+	 *  Open a project: validate it's a repo, add it to the workspace (up to [`MAX_PROJECTS`]),
+	 *  cache it, start a live watcher, and mark it active. Returns `Err` if the cap is reached.
 	 */
 	openRepository: (path: string) => typedError<RepoSummary, string>(__TAURI_INVOKE("open_repository", { path })),
-	/**  Path of the currently active repository, if any. */
+	/**
+	 *  The open projects with their live per-project sync state — powers the sidebar cards.
+	 *  Paths that no longer resolve as repos are skipped.
+	 */
+	listOpenRepos: () => typedError<ProjectStatus[], string>(__TAURI_INVOKE("list_open_repos")),
+	/**  Switch which open project the main views focus on. */
+	setActiveRepo: (path: string) => typedError<null, string>(__TAURI_INVOKE("set_active_repo", { path })),
+	/**
+	 *  Close a project: remove it from the workspace, stop its watcher, and — if it was the
+	 *  active one — fall back to another open project (or none).
+	 */
+	closeRepository: (path: string) => typedError<null, string>(__TAURI_INVOKE("close_repository", { path })),
+	/**  Path of the currently active project, if any. */
 	currentRepo: () => typedError<string | null, string>(__TAURI_INVOKE("current_repo")),
 	/**  Commits (with graph lanes) for the active repo — powers the Canvas timeline. */
 	listCommits: (limit: number) => typedError<CommitInfo[], string>(__TAURI_INVOKE("list_commits", { limit })),
+	/**
+	 *  The active repo's GitHub web base URL (`https://github.com/owner/repo`), if its `origin`
+	 *  remote is a GitHub URL — used to deep-link commits/contributors to github.com.
+	 */
+	githubRepoUrl: () => typedError<string | null, string>(__TAURI_INVOKE("github_repo_url")),
 	/**  Local + remote branches for the active repo. */
 	listBranches: () => typedError<BranchInfo[], string>(__TAURI_INVOKE("list_branches")),
 	/**  Working-tree status for the active repo. */
 	getStatus: () => typedError<RepoStatus, string>(__TAURI_INVOKE("get_status")),
 	/**  Conflicted files in the active repo (Merge Conflict Editor data source). */
 	listConflicts: () => typedError<ConflictHunk[], string>(__TAURI_INVOKE("list_conflicts")),
-	/**  Apply a conflict resolution (stub in the scaffold). */
+	/**  Resolve a conflict by taking one whole side (`resolution` = `"ours"`/`"theirs"`). */
 	resolveConflict: (file: string, resolution: string) => typedError<null, string>(__TAURI_INVOKE("resolve_conflict", { file, resolution })),
+	/**  Save a hand-edited merge resolution: write `content` to the file and stage it. */
+	saveConflictResolution: (file: string, content: string) => typedError<null, string>(__TAURI_INVOKE("save_conflict_resolution", { file, content })),
 	/**  "Who Did What" contributor metrics for the active repo. */
 	contributorStats: () => typedError<ContributorStat[], string>(__TAURI_INVOKE("contributor_stats")),
+	/**  Per-reviewer review-throughput metrics for the active repo (via the GitHub `gh` CLI). */
+	reviewStats: () => typedError<ReviewerStat[], string>(__TAURI_INVOKE("review_stats")),
 	/**
 	 *  CI/CD + compliance badges for the active repo: real DCO from local commit trailers +
 	 *  build/test from the GitHub Checks API (via `gh`). The poll is persisted to the local
 	 *  cache with a real `updated_at` before returning.
 	 */
 	getCiStatus: () => typedError<CiStatus[], string>(__TAURI_INVOKE("get_ci_status")),
+	/**  Background-fetch status for a specific project's sync indicator. */
+	fetchStatus: (path: string) => typedError<FetchStatus, string>(__TAURI_INVOKE("fetch_status", { path })),
+	/**
+	 *  Trigger a remote fetch for a specific project now (the "Fetch" button). Non-destructive:
+	 *  updates remote-tracking refs only. Returns that project's resulting status.
+	 */
+	fetchNow: (path: string) => typedError<FetchStatus, string>(__TAURI_INVOKE("fetch_now", { path })),
 	/**  Read a persisted user-config value (custom filters, aliases, groupings, …). */
 	getConfig: (key: string) => typedError<string | null, string>(__TAURI_INVOKE("get_config", { key })),
 	/**  Persist a user-config value. */
@@ -73,12 +101,17 @@ export type CommitInfo = {
 	lane: number,
 };
 
-/**  A conflicted file with its three-way sides (sides are placeholders in the scaffold). */
+/**
+ *  A conflicted file with its three-way sides (a side is empty when that stage is absent,
+ *  e.g. no ancestor in an add/add conflict) plus the current working-tree text, which after
+ *  a merge contains the `<<<<<<< / ======= / >>>>>>>` markers — the seed for manual editing.
+ */
 export type ConflictHunk = {
 	file: string,
 	ours: string,
 	theirs: string,
 	base: string,
+	merged: string,
 };
 
 export type ContributorStat = {
@@ -89,12 +122,45 @@ export type ContributorStat = {
 	reviews: number,
 };
 
+/**  State of the background remote-fetch worker, surfaced in the UI's sync indicator. */
+export type FetchStatus = {
+	/**  Whether the most recent fetch attempt succeeded. */
+	last_ok: boolean,
+	/**  Unix epoch seconds of the last attempt (0 if none yet this session). */
+	last_at: number | null,
+	/**  Empty on success; a short reason on failure. */
+	message: string,
+	/**  True while a fetch is currently in flight. */
+	running: boolean,
+};
+
 /**  Working-tree status for a single path. */
 export type FileStatus = {
 	path: string,
 	/**  One of: `new`, `modified`, `deleted`, `renamed`, `typechange`, `conflicted`, `ignored`. */
 	status: string,
 	staged: boolean,
+};
+
+/**
+ *  Per-project card data for the multi-project sidebar: identity + live sync state.
+ *  Bundles what one card needs so a single command feeds the whole open-projects list.
+ */
+export type ProjectStatus = {
+	path: string,
+	/**  Directory basename, shown as the card title. */
+	name: string,
+	head_branch: string | null,
+	commit_count: number,
+	branch_count: number,
+	/**  Commits the local branch is ahead / behind its remote. */
+	ahead: number,
+	behind: number,
+	has_conflicts: boolean,
+	/**  Whether this is the currently focused project. */
+	active: boolean,
+	/**  This project's own background-fetch status. */
+	fetch: FetchStatus,
 };
 
 /**  Aggregate working-tree + HEAD status for the open repository. */
@@ -112,6 +178,13 @@ export type RepoSummary = {
 	head_branch: string | null,
 	commit_count: number,
 	branch_count: number,
+};
+
+/**  Per-reviewer review activity across a repo's pull requests (throughput). */
+export type ReviewerStat = {
+	login: string,
+	reviews: number,
+	approvals: number,
 };
 
 /* Tauri Specta runtime */

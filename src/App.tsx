@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
 
 import { CollaborationDashboard } from "./components/CollaborationDashboard";
@@ -10,7 +10,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { TopBar } from "./components/TopBar";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useCommits } from "./hooks/useCommits";
-import { useRepository } from "./hooks/useRepository";
+import { useWorkspace } from "./hooks/useWorkspace";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import type { View } from "./lib/views";
 import { EVENTS, type CommitInfo } from "./services/tauri-ipc";
@@ -23,17 +23,22 @@ const TITLES: Record<View, string> = {
 };
 
 function App() {
-  const { repo, error, pickAndOpen, closeRepo } = useRepository();
+  const { projects, activePath, error, openProject, closeProject, setActive } =
+    useWorkspace();
   const [view, setView] = useState<View>("timeline");
   const [selected, setSelected] = useState<CommitInfo | null>(null);
 
-  const repoPath = repo?.path ?? null;
-  const { commits, refresh } = useCommits(repoPath);
+  const { commits, refresh } = useCommits(activePath);
 
-  // Ambient trigger: refresh the graph when the repo changes on disk.
+  // Ambient trigger: refresh the active graph when any repo changes on disk.
   useTauriEvent<string>(EVENTS.repoChanged, () => {
     void refresh();
   });
+
+  // Switching (or closing) the active project invalidates the selected commit.
+  useEffect(() => {
+    setSelected(null);
+  }, [activePath]);
 
   return (
     <RadixTooltip.Provider delayDuration={300}>
@@ -41,24 +46,22 @@ function App() {
         <Sidebar
           view={view}
           onNavigate={setView}
-          repo={repo}
-          onOpenRepo={pickAndOpen}
-          onCloseRepo={() => {
-            setSelected(null);
-            setView("timeline");
-            void closeRepo();
-          }}
+          projects={projects}
+          activePath={activePath}
+          onOpenProject={openProject}
+          onCloseProject={closeProject}
+          onSelectProject={setActive}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {!repo ? (
-            <WelcomeScreen onOpenRepo={pickAndOpen} error={error} />
+          {!activePath ? (
+            <WelcomeScreen onOpenRepo={openProject} error={error} />
           ) : (
             <>
               <TopBar
                 title={TITLES[view]}
-                repoPath={repoPath}
-                live={Boolean(repoPath)}
+                repoPath={activePath}
+                live
                 onRefresh={view === "timeline" ? () => void refresh() : undefined}
               />
               <div className="flex min-h-0 flex-1">
@@ -70,9 +73,9 @@ function App() {
                       onSelect={setSelected}
                     />
                   )}
-                  {view === "merge" && <MergeConflictEditor repoPath={repoPath} />}
-                  {view === "dashboard" && <CollaborationDashboard repoPath={repoPath} />}
-                  {view === "settings" && <SettingsPanel repoPath={repoPath} />}
+                  {view === "merge" && <MergeConflictEditor repoPath={activePath} />}
+                  {view === "dashboard" && <CollaborationDashboard repoPath={activePath} />}
+                  {view === "settings" && <SettingsPanel repoPath={activePath} />}
                 </main>
 
                 {view === "timeline" && selected && (

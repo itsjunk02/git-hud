@@ -1,5 +1,7 @@
 import { RefreshCw } from "lucide-react";
 
+import { SyncStatus } from "./SyncStatus";
+
 /** Header for the active view: title, repo path, live indicator, and refresh. */
 export function TopBar({
   title,
@@ -30,15 +32,18 @@ export function TopBar({
         <p className="truncate text-xs text-zinc-500">{subtitle ?? repoPath ?? "No repository"}</p>
       </div>
 
-      {onRefresh && (
-        <button
-          onClick={onRefresh}
-          className="ml-auto flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh
-        </button>
-      )}
+      <div className="ml-auto flex items-center gap-3">
+        <SyncStatus repoPath={repoPath} />
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </button>
+        )}
+      </div>
     </header>
   );
 }

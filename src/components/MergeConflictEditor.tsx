@@ -1,36 +1,52 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FileWarning, ShieldCheck } from "lucide-react";
 
 import { ipc, type ConflictHunk } from "../services/tauri-ipc";
 
 /**
- * Merge Conflict Editor (Action layer).
- *
- * Conflict *detection* is real (from the git2 index). The side-by-side content and the
- * resolve action are scaffold stubs — the layout + IPC wiring are in place so the split
- * diff can be filled in without changing the contract.
+ * Merge Conflict Editor (Action layer). Shows the three-way sides from the git2 index. You
+ * can take one whole side (yours/incoming) or hand-edit the merged result and save it — both
+ * write + stage the file, clearing the conflict.
  */
 export function MergeConflictEditor({ repoPath }: { repoPath: string | null }) {
   const [conflicts, setConflicts] = useState<ConflictHunk[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState("");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!repoPath) return;
     setLoading(true);
     ipc
       .listConflicts()
       .then((c) => {
         setConflicts(c);
-        setSelected(c[0]?.file ?? null);
+        setSelected((prev) => (c.some((x) => x.file === prev) ? prev : c[0]?.file ?? null));
       })
       .catch(() => setConflicts([]))
       .finally(() => setLoading(false));
   }, [repoPath]);
 
-  const resolve = async (file: string, choice: "ours" | "theirs") => {
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const active = conflicts.find((c) => c.file === selected) ?? null;
+
+  // Seed the editable merged pane whenever the selected conflict changes.
+  useEffect(() => {
+    setDraft(active?.merged ?? "");
+  }, [active?.file, active?.merged]);
+
+  const resolveSide = async (file: string, choice: "ours" | "theirs") => {
     await ipc.resolveConflict(file, choice).catch(() => undefined);
-    setConflicts((prev) => prev.filter((c) => c.file !== file));
+    load();
+  };
+
+  const saveManual = async () => {
+    if (!active) return;
+    await ipc.saveConflictResolution(active.file, draft).catch(() => undefined);
+    load();
   };
 
   if (!loading && conflicts.length === 0) {
@@ -42,8 +58,6 @@ export function MergeConflictEditor({ repoPath }: { repoPath: string | null }) {
       </div>
     );
   }
-
-  const active = conflicts.find((c) => c.file === selected) ?? null;
 
   return (
     <div className="flex h-full">
@@ -63,30 +77,47 @@ export function MergeConflictEditor({ repoPath }: { repoPath: string | null }) {
         ))}
       </div>
 
-      <div className="flex flex-1 flex-col">
-        <div className="border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 text-[11px] text-amber-300/80">
-          Scaffold: three-way content extraction is stubbed. Choose a side to simulate resolution.
-        </div>
-
+      <div className="flex min-w-0 flex-1 flex-col">
         {active ? (
           <>
-            <div className="grid flex-1 grid-cols-2 gap-px overflow-hidden bg-zinc-800">
+            {/* Read-only reference: the two sides. */}
+            <div className="grid h-40 shrink-0 grid-cols-2 gap-px overflow-hidden border-b border-zinc-800 bg-zinc-800">
               <DiffPane title="Your changes" body={active.ours} tint="text-emerald-300" />
               <DiffPane title="Incoming changes" body={active.theirs} tint="text-blue-300" />
             </div>
+
+            {/* Editable merged result, seeded with the working-tree conflict markers. */}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="border-b border-zinc-800 px-4 py-2 text-xs font-medium text-zinc-300">
+                Merged result — edit, then save
+              </div>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.currentTarget.value)}
+                spellCheck={false}
+                className="flex-1 resize-none bg-zinc-950 p-4 font-mono text-xs text-zinc-200 outline-none"
+              />
+            </div>
+
             <div className="flex items-center gap-2 border-t border-zinc-800 px-4 py-3">
               <span className="mr-auto truncate text-xs text-zinc-400">{active.file}</span>
               <button
-                onClick={() => resolve(active.file, "ours")}
+                onClick={() => resolveSide(active.file, "ours")}
                 className="rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-300 ring-1 ring-emerald-500/30 hover:bg-emerald-500/25"
               >
                 Accept yours
               </button>
               <button
-                onClick={() => resolve(active.file, "theirs")}
+                onClick={() => resolveSide(active.file, "theirs")}
                 className="rounded-md bg-blue-500/15 px-3 py-1.5 text-xs text-blue-300 ring-1 ring-blue-500/30 hover:bg-blue-500/25"
               >
                 Accept incoming
+              </button>
+              <button
+                onClick={saveManual}
+                className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-medium text-emerald-950 hover:bg-emerald-400"
+              >
+                Save resolution
               </button>
             </div>
           </>
@@ -104,9 +135,7 @@ function DiffPane({ title, body, tint }: { title: string; body: string; tint: st
   return (
     <div className="flex flex-col overflow-hidden bg-zinc-950">
       <div className={"border-b border-zinc-800 px-4 py-2 text-xs font-medium " + tint}>{title}</div>
-      <pre className="flex-1 overflow-auto p-4 text-xs text-zinc-400">
-        {body || "// content extraction not implemented in the scaffold"}
-      </pre>
+      <pre className="flex-1 overflow-auto p-4 text-xs text-zinc-400">{body || "(empty)"}</pre>
     </div>
   );
 }

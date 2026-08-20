@@ -10,12 +10,21 @@ import { ipc } from "../services/tauri-ipc";
 export function SettingsPanel({ repoPath }: { repoPath: string | null }) {
   const [alias, setAlias] = useState("");
   const [filter, setFilter] = useState("");
+  const [autoFetch, setAutoFetch] = useState(true);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     ipc.getConfig("repo_alias").then((v) => setAlias(v ?? "")).catch(() => undefined);
     ipc.getConfig("timeline_filter").then((v) => setFilter(v ?? "")).catch(() => undefined);
+    // Defaults to on: only the explicit "off" value disables auto-fetch.
+    ipc.getConfig("auto_fetch").then((v) => setAutoFetch(v !== "off")).catch(() => undefined);
   }, [repoPath]);
+
+  // Persist immediately — the background fetch worker reads this config each tick.
+  const toggleAutoFetch = async (on: boolean) => {
+    setAutoFetch(on);
+    await ipc.setConfig("auto_fetch", on ? "on" : "off").catch(() => undefined);
+  };
 
   const save = async () => {
     await ipc.setConfig("repo_alias", alias).catch(() => undefined);
@@ -40,6 +49,23 @@ export function SettingsPanel({ repoPath }: { repoPath: string | null }) {
         onChange={setFilter}
         placeholder="e.g. bot@ci.example.com"
       />
+
+      <label className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={autoFetch}
+          onChange={(e) => void toggleAutoFetch(e.currentTarget.checked)}
+          className="mt-0.5 h-4 w-4 accent-emerald-500"
+        />
+        <span>
+          <span className="text-sm font-medium text-zinc-200">Auto-fetch from remote</span>
+          <span className="mt-0.5 block text-xs text-zinc-500">
+            Runs a background <code>git fetch</code> every 2 minutes so commits pushed on the
+            web show up (as “behind”) without pulling manually. Never merges. Off keeps
+            git-hud fully offline.
+          </span>
+        </span>
+      </label>
 
       <div className="flex items-center gap-3">
         <button
