@@ -17,21 +17,54 @@ A background Rust engine parses Git directly through `libgit2` (no shelling out 
 `git` CLI), caches derived metrics in local SQLite, and streams change events to a
 React/Canvas frontend. 
 
+## 📸 Screenshots
+
+### Commit & branch timeline
+Canvas-rendered graph across every branch, with a full commit-detail inspector.
+
+![Commit & branch timeline](docs/screenshots/timeline.png)
+
+### Collaboration dashboard
+Ownership by commit attribution across all branches, resolved to GitHub-style usernames.
+
+![Collaboration — Contributors](docs/screenshots/collaboration.png)
+
+### Merge conflict editor
+Three-way sides with one-click resolution or a hand-edited, savable merge.
+
+![Merge conflict editor](docs/screenshots/conflicts.png)
+
 ## ✨ Features
 
- Feature | Status in this build |
-|  --- | --- |
-|  OS tray HUD + `.git` file-watcher + background CI/CD poll emitting ambient change events | ✅ Wired end-to-end |
-|  High-performance Canvas **commit & branch timeline** (real `git2` data, DPR-aware) | ✅ Real |
-|  1-click **Merge Conflict Editor** with side-by-side split diff | ✅  Detection real; content/resolution  |
-|  collaboration dashboard (ownership by commit attribution) |  Commit attribution real; ownership/reviews stubbed |
-|  CI/CD pipeline health + DCO/CLA compliance badges | 🔶 Stubbed poll |
-|  Repo aliases, filters & config persisted in local SQLite so the app compounds over time | ✅ Real |
+### 🗂️ Multi-project workspace
+- Manage up to **7 repositories side by side** in the project sidebar — open, switch, and close repos without losing context.
+- Each card shows live status at a glance: current branch, ahead/behind counts, working-tree state, and commit count.
 
-> This repository is an **initialized scaffold**: the full architecture, type-safe IPC,
-> and background workers are in place and compiling. The commit timeline is a complete
-> vertical slice; the remaining feature screens are functional stubs wired to the same
-> plumbing, ready to be filled in.
+### 🌳 Commit & branch timeline
+- High-performance **HTML5 Canvas** commit graph (DPR-aware for crisp rendering on retina/large histories).
+- Seeded from `HEAD` **and every branch tip** — local *and* remote-tracking — so parallel work and freshly fetched commits show up before they merge.
+- Click any commit for a full inspector: author, date, full SHA, and parents.
+
+### 🔀 Merge conflict editor
+- Detects index conflicts and shows the **three-way sides** (ours / base / theirs) from `libgit2`.
+- Resolve in one click (**Accept yours** / **Accept incoming**) or hand-edit the merged result and **Save** — both write back to the working tree and stage the file.
+- **Who-is-in-conflict-with-whom attribution:** each `<<<<<<<` region is blamed on both sides, so you see the exact author *sets* per side, a merge-wide **conflict-pairs** summary, and the incoming branch — even when several people touched the same region.
+
+### 👥 Collaboration dashboard
+- **Contributors** — ownership by commit attribution across all branches, shown as **GitHub-style usernames**; click a contributor to drill into their commits.
+- **Reviews** — per-reviewer review throughput from the GitHub PR/reviews API.
+- **CI & Compliance** — pipeline health from the GitHub **Checks API** plus local **DCO sign-off** verification.
+
+### 🛰️ Ambient HUD
+- **OS tray icon** with alerts, a `.git` **file-watcher**, and a background **auto-fetch + CI poll** that stream change events straight into the UI.
+
+### 💾 Local-first & private
+- All Git parsing runs through **vendored libgit2** (no `git` CLI subprocess); derived metrics are cached in local **SQLite**. No account, no telemetry, works offline.
+
+> **Forge features require a GitHub remote and the [`gh`](https://cli.github.com) CLI**
+> (authenticated via `gh auth login`). Reviews and the CI half of CI & Compliance call the
+> GitHub API through `gh`; DCO verification is fully local. Everything else works on any
+> local Git repository.
 
 ## 🏗️ Architecture
 
@@ -51,7 +84,8 @@ React/Canvas frontend.
 │   lib.rs ── #[tauri::command] surface + tray + workers      │
 │      │                                                       │
 │      ├── engine/   git.rs · watcher.rs · stats.rs ·         │
-│      │             conflicts.rs · remote.rs · model.rs      │
+│      │             conflicts.rs · remote.rs · reviews.rs ·  │
+│      │             sync.rs · model.rs                       │
 │      │                └── git2 (vendored libgit2)           │
 │      └── db/       SQLite cache (rusqlite, bundled)          │
 └──────────────────────────────────────────────────────────────┘
@@ -125,7 +159,8 @@ git-hud/
     ├── src/
     │   ├── lib.rs                # commands, tauri-specta builder, tray, background workers
     │   ├── error.rs              # AppError (thiserror)
-    │   ├── engine/               # git.rs, watcher.rs, stats.rs, conflicts.rs, remote.rs, model.rs
+    │   ├── engine/               # git.rs, watcher.rs, stats.rs, conflicts.rs,
+    │   │                         #   remote.rs, reviews.rs, sync.rs, model.rs
     │   └── db/                   # mod.rs, migrations.rs, cache.rs
     ├── capabilities/default.json # window permissions (core, event, dialog, notification)
     ├── tauri.conf.json · build.rs · Cargo.toml
@@ -135,18 +170,26 @@ git-hud/
 
 Defined in `src-tauri/src/lib.rs`, consumed type-safely via `src/services/tauri-ipc.ts`:
 
-`open_repository` · `current_repo` · `list_commits` · `list_branches` · `get_status` ·
-`list_conflicts` · `resolve_conflict` · `contributor_stats` · `get_ci_status` ·
-`get_config` · `set_config`
+*Workspace* — `open_repository` · `list_open_repos` · `set_active_repo` · `close_repository` · `current_repo`
+*History* — `list_commits` · `list_branches` · `get_status` · `github_repo_url`
+*Conflicts* — `list_conflicts` · `conflict_summary` · `resolve_conflict` · `save_conflict_resolution`
+*Collaboration* — `contributor_stats` · `review_stats` · `get_ci_status`
+*Sync & config* — `fetch_status` · `fetch_now` · `get_config` · `set_config`
 
 Backend → frontend events: `repo-changed` (file watcher), `ci-poll` (CI heartbeat).
 
-## 🧭 Roadmap (filling in the stubs)
+## 🧭 Roadmap
 
-- Three-way blob extraction + write-back for the Merge Conflict Editor
-- Blame-based ownership heatmaps and review-throughput metrics
-- Real forge integration (GitHub/GitLab) for CI/CD status and DCO/CLA verification
-- Push/pull/commit actions from the branch timeline
+Shipped since the initial scaffold: three-way conflict resolution with write-back,
+blame-based conflict attribution, contributor stats across all branches, GitHub Checks CI,
+DCO verification, review throughput, multi-project workspace, and background auto-fetch.
+
+Next up:
+
+- Push / pull / commit actions directly from the branch timeline
+- Blame-based ownership heatmaps in the Contributors view
+- GitLab and self-hosted forge support alongside GitHub
+- Interactive rebase / cherry-pick helpers on top of the conflict-attribution engine
 
 ## 📄 License
 
