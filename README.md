@@ -30,9 +30,9 @@ Ownership by commit attribution across all branches, resolved to GitHub-style us
 ![Collaboration — Contributors](docs/screenshots/collaboration.png)
 
 ### Merge conflict editor
-Three-way sides with one-click resolution or a hand-edited, savable merge.
+Three-way sides with one-click resolution or a hand-edited, savable merge — plus **blame-based attribution**: the merge banner, `who ↔ whom` conflict-pair chips, and a per-region author breakdown.
 
-![Merge conflict editor](docs/screenshots/conflicts.png)
+![Merge conflict editor with who-vs-whom attribution](docs/screenshots/conflicts.png)
 
 ## ✨ Features
 
