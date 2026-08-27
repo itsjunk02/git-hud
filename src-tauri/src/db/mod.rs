@@ -22,3 +22,4 @@ pub fn open(db_path: &Path) -> AppResult<Connection> {
     migrations::runner().to_latest(&mut conn)?;
     Ok(conn)
 }
+

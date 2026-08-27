@@ -100,7 +100,7 @@ export function CollaborationDashboard({ repoPath }: { repoPath: string | null }
                 <ArrowLeft className="h-3.5 w-3.5" /> Back
               </button>
               <span className="truncate text-sm font-medium text-zinc-100">
-                {selectedPerson?.author_name || selectedEmail}
+                {selectedPerson?.username || selectedEmail}
               </span>
               <span className="shrink-0 text-xs text-zinc-500">
                 {selectedCommits.length} commit{selectedCommits.length === 1 ? "" : "s"}
@@ -137,7 +137,7 @@ export function CollaborationDashboard({ repoPath }: { repoPath: string | null }
         ) : (
           <>
             <p className="mb-4 text-xs text-zinc-500">
-              Ownership by commit attribution across reachable history. Click a contributor to
+              Ownership by commit attribution across all branches. Click a contributor to
               see their commits.
             </p>
             <div className="space-y-2">
@@ -154,12 +154,12 @@ export function CollaborationDashboard({ repoPath }: { repoPath: string | null }
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-emerald-950"
                       style={{ backgroundColor: `rgba(52,211,153,${heat})` }}
                     >
-                      {initials(s.author_name)}
+                      {initials(s.username)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">
                         <span className="truncate text-sm text-zinc-100">
-                          {s.author_name || s.author_email || "Unknown"}
+                          {s.username || s.author_email || "Unknown"}
                         </span>
                         <span className="shrink-0 text-xs text-zinc-500">
                           {s.commits.toLocaleString()} commits · {share}%

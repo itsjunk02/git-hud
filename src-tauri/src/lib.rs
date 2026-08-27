@@ -20,7 +20,7 @@ use rusqlite::Connection;
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
-use engine::conflicts::ConflictHunk;
+use engine::conflicts::{ConflictHunk, MergeConflictSummary};
 use engine::model::{BranchInfo, CommitInfo, FetchStatus, ProjectStatus, RepoStatus, RepoSummary};
 use engine::remote::CiStatus;
 use engine::reviews::ReviewerStat;
@@ -328,6 +328,16 @@ fn list_conflicts(state: tauri::State<'_, AppState>) -> Result<Vec<ConflictHunk>
     engine::conflicts::list_conflicts(&path).map_err(|e| e.to_string())
 }
 
+/// Merge-level "who is in conflict with whom": branches, tip authors, and conflict pairs.
+#[tauri::command]
+#[specta::specta]
+fn conflict_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<MergeConflictSummary, String> {
+    let path = require_repo(&state)?;
+    engine::conflicts::conflict_summary(&path).map_err(|e| e.to_string())
+}
+
 /// Resolve a conflict by taking one whole side (`resolution` = `"ours"`/`"theirs"`).
 #[tauri::command]
 #[specta::specta]
@@ -454,6 +464,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         list_branches,
         get_status,
         list_conflicts,
+        conflict_summary,
         resolve_conflict,
         save_conflict_resolution,
         contributor_stats,

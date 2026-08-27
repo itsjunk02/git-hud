@@ -36,6 +36,8 @@ export const commands = {
 	getStatus: () => typedError<RepoStatus, string>(__TAURI_INVOKE("get_status")),
 	/**  Conflicted files in the active repo (Merge Conflict Editor data source). */
 	listConflicts: () => typedError<ConflictHunk[], string>(__TAURI_INVOKE("list_conflicts")),
+	/**  Merge-level "who is in conflict with whom": branches, tip authors, and conflict pairs. */
+	conflictSummary: () => typedError<MergeConflictSummary, string>(__TAURI_INVOKE("conflict_summary")),
 	/**  Resolve a conflict by taking one whole side (`resolution` = `"ours"`/`"theirs"`). */
 	resolveConflict: (file: string, resolution: string) => typedError<null, string>(__TAURI_INVOKE("resolve_conflict", { file, resolution })),
 	/**  Save a hand-edited merge resolution: write `content` to the file and stage it. */
@@ -102,9 +104,21 @@ export type CommitInfo = {
 };
 
 /**
+ *  An author who owns some of the conflicting lines on one side, with the line count
+ *  they contributed (used to rank and to show the dominant owner).
+ */
+export type ConflictAuthor = {
+	username: string,
+	name: string,
+	email: string,
+	lines: number,
+};
+
+/**
  *  A conflicted file with its three-way sides (a side is empty when that stage is absent,
  *  e.g. no ancestor in an add/add conflict) plus the current working-tree text, which after
  *  a merge contains the `<<<<<<< / ======= / >>>>>>>` markers — the seed for manual editing.
+ *  `ours_authors`/`theirs_authors` are the file-level union across all regions.
  */
 export type ConflictHunk = {
 	file: string,
@@ -112,11 +126,47 @@ export type ConflictHunk = {
 	theirs: string,
 	base: string,
 	merged: string,
+	ours_authors: ConflictAuthor[],
+	theirs_authors: ConflictAuthor[],
+	regions: ConflictRegion[],
+};
+
+/**
+ *  A who-vs-whom pairing aggregated across the whole in-progress merge: `ours` (an author
+ *  on our side) conflicts with `theirs` (an author on the incoming side) across `regions`
+ *  conflict regions.
+ */
+export type ConflictPair = {
+	ours: string,
+	theirs: string,
+	regions: number,
+};
+
+/**
+ *  One `<<<<<<< / ======= / >>>>>>>` region within a conflicted file, with the distinct
+ *  authors of each side's lines (from git blame). `approximate` is set when the region's
+ *  block text could not be located in a side's blob and attribution fell back to the
+ *  whole-side author set.
+ */
+export type ConflictRegion = {
+	index: number,
+	ours_start: number,
+	ours_end: number,
+	theirs_start: number,
+	theirs_end: number,
+	ours_authors: ConflictAuthor[],
+	theirs_authors: ConflictAuthor[],
+	approximate: boolean,
 };
 
 export type ContributorStat = {
 	author_name: string,
 	author_email: string,
+	/**
+	 *  GitHub-style handle for display, derived from the commit email (falling back
+	 *  to the git author name). See [`derive_username`].
+	 */
+	username: string,
 	commits: number,
 	files_owned: number,
 	reviews: number,
@@ -140,6 +190,19 @@ export type FileStatus = {
 	/**  One of: `new`, `modified`, `deleted`, `renamed`, `typechange`, `conflicted`, `ignored`. */
 	status: string,
 	staged: boolean,
+};
+
+/**
+ *  Merge-level summary for the Conflicts banner: which branches, the two tip authors, and
+ *  the aggregated conflict pairs.
+ */
+export type MergeConflictSummary = {
+	in_merge: boolean,
+	ours_branch: string | null,
+	incoming_branch: string | null,
+	ours_tip: ConflictAuthor | null,
+	theirs_tip: ConflictAuthor | null,
+	pairs: ConflictPair[],
 };
 
 /**
