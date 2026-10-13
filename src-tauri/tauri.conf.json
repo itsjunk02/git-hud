@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "git-hud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.akhil.git-hud",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -27,6 +27,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "A lightweight, high-performance local-first Git HUD",
+    "longDescription": "git-hud is a desktop Git GUI: a 60fps commit canvas, conflict editor, stage/commit, an integrated terminal, and collaboration insights — all local-first via libgit2.",
+    "copyright": "© 2026 git-hud contributors (MIT)",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
