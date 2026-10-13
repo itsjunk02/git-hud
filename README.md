@@ -30,6 +30,7 @@ Grab a pre-built installer — **no toolchain required**.
 | **macOS** · Intel | `git-hud_*_x64.dmg` | Open the dmg, drag **git-hud** to Applications |
 | **Windows** | `git-hud_*_x64-setup.exe` (or `_x64_en-US.msi`) | Run the installer |
 | **Linux** · Debian/Ubuntu | `git-hud_*_amd64.deb` | `sudo apt install ./git-hud_*_amd64.deb` |
+| **Linux** · Fedora/RHEL | `git-hud-*.x86_64.rpm` | `sudo dnf install ./git-hud-*.x86_64.rpm` |
 | **Linux** · any distro | `git-hud_*_amd64.AppImage` | `chmod +x git-hud_*_amd64.AppImage && ./git-hud_*_amd64.AppImage` |
 
 End users need **nothing** pre-installed — the app is self-contained (the `.deb` pulls its
