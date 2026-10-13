@@ -14,7 +14,7 @@ mod engine;
 mod error;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 use tauri::{Emitter, Manager};
@@ -55,6 +55,10 @@ pub struct AppState {
     pub fetch: Mutex<HashMap<String, FetchStatus>>,
     /// Per-project last-seen alert state, so notifications fire only on new items.
     pub alerts: Mutex<HashMap<String, AlertState>>,
+    /// Live integrated-terminal sessions, keyed by a client-supplied id (see [`engine::terminal`]).
+    pub ptys: Mutex<HashMap<String, engine::terminal::PtySession>>,
+    /// Per-repo write mutex, so index/ref mutations for one repo never race each other.
+    pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl AppState {
@@ -66,6 +70,8 @@ impl AppState {
             watchers: Mutex::new(HashMap::new()),
             fetch: Mutex::new(HashMap::new()),
             alerts: Mutex::new(HashMap::new()),
+            ptys: Mutex::new(HashMap::new()),
+            write_locks: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -111,6 +117,34 @@ fn require_repo(state: &AppState) -> Result<String, String> {
         .unwrap()
         .clone()
         .ok_or_else(|| AppError::NoRepo.to_string())
+}
+
+/// The per-repo write mutex, created on first use. Callers hold its guard for the duration of
+/// a write so index/ref mutations for one repo are serialized (reads don't take it).
+fn write_lock_for(state: &AppState, path: &str) -> Arc<Mutex<()>> {
+    state
+        .write_locks
+        .lock()
+        .unwrap()
+        .entry(path.to_string())
+        .or_default()
+        .clone()
+}
+
+/// Shared post-write reconcile: refresh the commit cache and nudge the UI to re-query. Called
+/// after every write so the Timeline/Changes views update immediately (the `.git` watcher is a
+/// backup, not the primary trigger). Mirrors the caching in [`open_internal`] + the
+/// `repo-changed` emit in [`run_fetch`].
+fn reconcile_after_write(app: &tauri::AppHandle, state: &AppState, path: &str) {
+    {
+        let conn = state.db.lock().unwrap();
+        if let Ok(repo_id) = db::cache::upsert_repo(&conn, path) {
+            if let Ok(commits) = engine::git::list_commits(path, 200) {
+                let _ = db::cache::cache_commits(&conn, repo_id, &commits);
+            }
+        }
+    }
+    let _ = app.emit(engine::watcher::REPO_CHANGED_EVENT, path.to_string());
 }
 
 /// Persist the open-project set + active project to the config table, so the workspace
@@ -270,6 +304,18 @@ fn close_repository(state: tauri::State<'_, AppState>, path: String) -> Result<(
     // Dropping the watcher handle stops the OS watch.
     state.watchers.lock().unwrap().remove(&path);
     state.fetch.lock().unwrap().remove(&path);
+    // Reap this repo's terminal sessions (kill shells, close fds). Drain under the lock,
+    // drop outside it.
+    let reaped: Vec<engine::terminal::PtySession> = {
+        let mut ptys = state.ptys.lock().unwrap();
+        let ids: Vec<String> = ptys
+            .iter()
+            .filter(|(_, s)| s.repo == path)
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.iter().filter_map(|id| ptys.remove(id)).collect()
+    };
+    drop(reaped);
     persist_workspace(&state);
     Ok(())
 }
@@ -447,6 +493,128 @@ fn set_config(
 }
 
 // ---------------------------------------------------------------------------
+// Write commands (stage / unstage / commit)
+//
+// Each serializes on the active repo's write lock for its whole body, then runs the shared
+// post-write reconcile so the cache + UI refresh deterministically.
+// ---------------------------------------------------------------------------
+
+/// Stage the given paths in the active repo (`git add <pathspec>`: new, modified, deleted).
+#[tauri::command]
+#[specta::specta]
+fn stage_paths(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let repo = require_repo(&state)?;
+    let lock = write_lock_for(&state, &repo);
+    let _guard = lock.lock().unwrap();
+    engine::writes::stage_paths(&repo, &paths).map_err(|e| e.to_string())?;
+    reconcile_after_write(&app, &state, &repo);
+    Ok(())
+}
+
+/// Unstage the given paths in the active repo (`git restore --staged`).
+#[tauri::command]
+#[specta::specta]
+fn unstage_paths(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let repo = require_repo(&state)?;
+    let lock = write_lock_for(&state, &repo);
+    let _guard = lock.lock().unwrap();
+    engine::writes::unstage_paths(&repo, &paths).map_err(|e| e.to_string())?;
+    reconcile_after_write(&app, &state, &repo);
+    Ok(())
+}
+
+/// Commit the staged tree in the active repo. `amend` rewrites HEAD (only when it's not yet
+/// pushed). Returns the new commit's OID.
+#[tauri::command]
+#[specta::specta]
+fn commit(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    message: String,
+    amend: bool,
+) -> Result<String, String> {
+    let repo = require_repo(&state)?;
+    let lock = write_lock_for(&state, &repo);
+    let _guard = lock.lock().unwrap();
+    let oid = engine::writes::commit(&repo, &message, amend).map_err(|e| e.to_string())?;
+    reconcile_after_write(&app, &state, &repo);
+    Ok(oid)
+}
+
+// ---------------------------------------------------------------------------
+// Integrated terminal (PTY) commands
+// ---------------------------------------------------------------------------
+
+/// Spawn a shell on a new PTY in the active repo's working directory, keyed by the
+/// client-supplied `id`. The frontend generates the id so it can subscribe to
+/// `pty-output-<id>` *before* calling this — no early output (e.g. the first prompt) is lost.
+/// `pty-exit-<id>` fires once when the shell ends.
+#[tauri::command]
+#[specta::specta]
+fn pty_spawn(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let repo = require_repo(&state)?;
+    let session = engine::terminal::spawn(&app, id.clone(), &repo, cols, rows)?;
+    let mut ptys = state.ptys.lock().unwrap();
+    if ptys.contains_key(&id) {
+        // Dropping `session` here kills the just-spawned shell.
+        return Err("terminal session id already exists".to_string());
+    }
+    ptys.insert(id, session);
+    Ok(())
+}
+
+/// Write keystrokes (UTF-8) to a session's shell stdin.
+#[tauri::command]
+#[specta::specta]
+fn pty_write(state: tauri::State<'_, AppState>, id: String, data: String) -> Result<(), String> {
+    let mut ptys = state.ptys.lock().unwrap();
+    let session = ptys
+        .get_mut(&id)
+        .ok_or_else(|| "terminal session not found".to_string())?;
+    session.write(data.as_bytes())
+}
+
+/// Resize a session's PTY (drives the shell's reflow / `SIGWINCH`).
+#[tauri::command]
+#[specta::specta]
+fn pty_resize(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let ptys = state.ptys.lock().unwrap();
+    let session = ptys
+        .get(&id)
+        .ok_or_else(|| "terminal session not found".to_string())?;
+    session.resize(cols, rows)
+}
+
+/// Kill a session: remove it from the map, then drop it *outside* the lock so its `Drop`
+/// (which kills the shell + detaches the reader thread) can't stall other terminal commands.
+#[tauri::command]
+#[specta::specta]
+fn pty_kill(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let session = state.ptys.lock().unwrap().remove(&id);
+    drop(session);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // IPC binding builder + app wiring
 // ---------------------------------------------------------------------------
 
@@ -474,7 +642,26 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         fetch_now,
         get_config,
         set_config,
+        stage_paths,
+        unstage_paths,
+        commit,
+        pty_spawn,
+        pty_write,
+        pty_resize,
+        pty_kill,
     ])
+}
+
+/// Kill every live terminal session (shells + pty fds). Drains under the lock, then drops
+/// the sessions *outside* it. Called on repo close, window close, and app quit so no shell
+/// is orphaned and no file descriptor leaks.
+fn reap_all_ptys<M: tauri::Manager<tauri::Wry>>(manager: &M) {
+    let drained = {
+        let state = manager.state::<AppState>();
+        let mut ptys = state.ptys.lock().unwrap();
+        std::mem::take(&mut *ptys)
+    };
+    drop(drained);
 }
 
 /// Stable id so the tray can be looked up and its tooltip updated after creation.
@@ -493,7 +680,11 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .tooltip("git-hud — monitoring your repositories")
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "quit" => app.exit(0),
+            "quit" => {
+                // Quit bypasses Drop (process::exit), so reap shells + fds first.
+                reap_all_ptys(app);
+                app.exit(0);
+            }
             "open" => {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
@@ -713,6 +904,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(builder.invoke_handler())
+        .on_window_event(|window, event| {
+            // Tear down all terminal sessions when the window goes away.
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+            ) {
+                reap_all_ptys(window);
+            }
+        })
         .setup(move |app| {
             builder.mount_events(app);
 

@@ -1,20 +1,24 @@
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, SquareTerminal } from "lucide-react";
 
 import { SyncStatus } from "./SyncStatus";
 
-/** Header for the active view: title, repo path, live indicator, and refresh. */
+/** Header for the active view: title, repo path, live indicator, refresh, and terminal toggle. */
 export function TopBar({
   title,
   subtitle,
   repoPath,
   live,
   onRefresh,
+  terminalOpen,
+  onToggleTerminal,
 }: {
   title: string;
   subtitle?: string;
   repoPath: string | null;
   live: boolean;
   onRefresh?: () => void;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }) {
   return (
     <header className="flex items-center gap-3 border-b border-zinc-800 px-5 py-3">
@@ -41,6 +45,22 @@ export function TopBar({
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
+          </button>
+        )}
+        {onToggleTerminal && (
+          <button
+            onClick={onToggleTerminal}
+            title="Toggle terminal (Ctrl+`)"
+            aria-label="Toggle terminal"
+            className={
+              "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors " +
+              (terminalOpen
+                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800")
+            }
+          >
+            <SquareTerminal className="h-3.5 w-3.5" />
+            Terminal
           </button>
         )}
       </div>

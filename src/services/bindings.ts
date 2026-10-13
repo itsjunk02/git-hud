@@ -63,6 +63,31 @@ export const commands = {
 	getConfig: (key: string) => typedError<string | null, string>(__TAURI_INVOKE("get_config", { key })),
 	/**  Persist a user-config value. */
 	setConfig: (key: string, value: string) => typedError<null, string>(__TAURI_INVOKE("set_config", { key, value })),
+	/**  Stage the given paths in the active repo (`git add <pathspec>`: new, modified, deleted). */
+	stagePaths: (paths: string[]) => typedError<null, string>(__TAURI_INVOKE("stage_paths", { paths })),
+	/**  Unstage the given paths in the active repo (`git restore --staged`). */
+	unstagePaths: (paths: string[]) => typedError<null, string>(__TAURI_INVOKE("unstage_paths", { paths })),
+	/**
+	 *  Commit the staged tree in the active repo. `amend` rewrites HEAD (only when it's not yet
+	 *  pushed). Returns the new commit's OID.
+	 */
+	commit: (message: string, amend: boolean) => typedError<string, string>(__TAURI_INVOKE("commit", { message, amend })),
+	/**
+	 *  Spawn a shell on a new PTY in the active repo's working directory, keyed by the
+	 *  client-supplied `id`. The frontend generates the id so it can subscribe to
+	 *  `pty-output-<id>` *before* calling this — no early output (e.g. the first prompt) is lost.
+	 *  `pty-exit-<id>` fires once when the shell ends.
+	 */
+	ptySpawn: (id: string, cols: number, rows: number) => typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cols, rows })),
+	/**  Write keystrokes (UTF-8) to a session's shell stdin. */
+	ptyWrite: (id: string, data: string) => typedError<null, string>(__TAURI_INVOKE("pty_write", { id, data })),
+	/**  Resize a session's PTY (drives the shell's reflow / `SIGWINCH`). */
+	ptyResize: (id: string, cols: number, rows: number) => typedError<null, string>(__TAURI_INVOKE("pty_resize", { id, cols, rows })),
+	/**
+	 *  Kill a session: remove it from the map, then drop it *outside* the lock so its `Drop`
+	 *  (which kills the shell + detaches the reader thread) can't stall other terminal commands.
+	 */
+	ptyKill: (id: string) => typedError<null, string>(__TAURI_INVOKE("pty_kill", { id })),
 };
 
 /* Types */
@@ -184,12 +209,21 @@ export type FetchStatus = {
 	running: boolean,
 };
 
-/**  Working-tree status for a single path. */
+/**
+ *  Working-tree status for a single path, split into its two sides so a file that is staged
+ *  *and* has further unstaged edits can show in both the Staged and Unstaged lists.
+ */
 export type FileStatus = {
 	path: string,
-	/**  One of: `new`, `modified`, `deleted`, `renamed`, `typechange`, `conflicted`, `ignored`. */
-	status: string,
-	staged: boolean,
+	/**
+	 *  Staged (index-vs-HEAD) side: `new`, `modified`, `deleted`, `renamed`, `typechange`,
+	 *  or `unmodified` when nothing is staged for this path.
+	 */
+	index_status: string,
+	/**  Unstaged (worktree-vs-index) side: same vocabulary (`new` = untracked), or `unmodified`. */
+	worktree_status: string,
+	/**  True when the path has unresolved merge conflicts. */
+	conflicted: boolean,
 };
 
 /**

@@ -34,13 +34,18 @@ pub struct BranchInfo {
     pub target: Option<String>,
 }
 
-/// Working-tree status for a single path.
+/// Working-tree status for a single path, split into its two sides so a file that is staged
+/// *and* has further unstaged edits can show in both the Staged and Unstaged lists.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct FileStatus {
     pub path: String,
-    /// One of: `new`, `modified`, `deleted`, `renamed`, `typechange`, `conflicted`, `ignored`.
-    pub status: String,
-    pub staged: bool,
+    /// Staged (index-vs-HEAD) side: `new`, `modified`, `deleted`, `renamed`, `typechange`,
+    /// or `unmodified` when nothing is staged for this path.
+    pub index_status: String,
+    /// Unstaged (worktree-vs-index) side: same vocabulary (`new` = untracked), or `unmodified`.
+    pub worktree_status: String,
+    /// True when the path has unresolved merge conflicts.
+    pub conflicted: bool,
 }
 
 /// Aggregate working-tree + HEAD status for the open repository.

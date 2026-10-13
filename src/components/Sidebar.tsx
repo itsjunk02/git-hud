@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  FileDiff,
   FolderOpen,
   GitBranch,
   GitMerge,
@@ -18,6 +19,7 @@ const MAX_PROJECTS = 7;
 
 const NAV: { id: View; label: string; icon: typeof GitBranch; hint: string }[] = [
   { id: "timeline", label: "Timeline", icon: GitBranch, hint: "Commit & branch graph" },
+  { id: "changes", label: "Changes", icon: FileDiff, hint: "Stage & commit" },
   { id: "merge", label: "Conflicts", icon: GitMerge, hint: "Merge conflict editor" },
   { id: "dashboard", label: "Collaboration", icon: Users, hint: "Who did what" },
   { id: "settings", label: "Settings", icon: SettingsIcon, hint: "Aliases & filters" },

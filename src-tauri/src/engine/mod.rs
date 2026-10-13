@@ -8,4 +8,6 @@ pub mod remote;
 pub mod reviews;
 pub mod stats;
 pub mod sync;
+pub mod terminal;
 pub mod watcher;
+pub mod writes;

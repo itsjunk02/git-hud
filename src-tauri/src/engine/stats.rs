@@ -61,8 +61,14 @@ pub(crate) fn derive_username(name: &str, email: &str) -> String {
 /// committed on unmerged feature branches (or branches fetched from the remote)
 /// are counted, matching what the Timeline shows. Counting only HEAD-reachable
 /// history hides a new collaborator until their branch lands on the current branch.
+///
+/// Authors are resolved through the repo's `.mailmap` first, so one person who
+/// committed under multiple name/email identities (e.g. a local gmail address and
+/// a GitHub `@users.noreply.github.com` address) collapses into a single
+/// contributor once they declare the alias — mirroring `git shortlog`.
 pub fn contributor_stats(path: &str) -> AppResult<Vec<ContributorStat>> {
     let repo = git2::Repository::discover(path)?;
+    let mailmap = repo.mailmap().ok();
     let mut walk = repo.revwalk()?;
     walk.set_sorting(git2::Sort::TIME)?;
     let _ = walk.push_head();
@@ -77,9 +83,7 @@ pub fn contributor_stats(path: &str) -> AppResult<Vec<ContributorStat>> {
     let mut by_email: HashMap<String, ContributorStat> = HashMap::new();
     for oid in walk.flatten() {
         if let Ok(commit) = repo.find_commit(oid) {
-            let author = commit.author();
-            let email = author.email().unwrap_or_default().to_string();
-            let name = author.name().unwrap_or_default().to_string();
+            let (name, email) = author_identity(&commit, mailmap.as_ref());
             let username = derive_username(&name, &email);
             by_email
                 .entry(email.clone())
@@ -98,6 +102,25 @@ pub fn contributor_stats(path: &str) -> AppResult<Vec<ContributorStat>> {
     let mut stats: Vec<ContributorStat> = by_email.into_values().collect();
     stats.sort_by(|a, b| b.commits.cmp(&a.commits));
     Ok(stats)
+}
+
+/// The commit author's `(name, email)`, resolved through `.mailmap` when one is
+/// present so declared aliases map to a single canonical identity. Falls back to
+/// the raw author signature when there's no mailmap or resolution fails.
+fn author_identity(commit: &git2::Commit, mailmap: Option<&git2::Mailmap>) -> (String, String) {
+    if let Some(mm) = mailmap {
+        if let Ok(sig) = commit.author_with_mailmap(mm) {
+            return (
+                sig.name().unwrap_or_default().to_string(),
+                sig.email().unwrap_or_default().to_string(),
+            );
+        }
+    }
+    let sig = commit.author();
+    (
+        sig.name().unwrap_or_default().to_string(),
+        sig.email().unwrap_or_default().to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -143,6 +166,53 @@ mod tests {
             emails.contains(&"dave@example.com"),
             "contributor on unmerged branch was dropped: {emails:?}"
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Two commits authored under different identities that a `.mailmap` declares to be
+    /// the same person must collapse into ONE contributor (as `git shortlog` does).
+    /// Regression for a person double-counted across their gmail + GitHub noreply address.
+    #[test]
+    fn mailmap_merges_split_identities_into_one_contributor() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("githud-mailmap-{unique}"));
+        let repo = git2::Repository::init(&dir).unwrap();
+
+        let commit_file = |name: &str, sig: &git2::Signature, parents: &[git2::Oid]| -> git2::Oid {
+            std::fs::write(dir.join(name), name).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new(name)).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parent_commits: Vec<git2::Commit> =
+                parents.iter().map(|o| repo.find_commit(*o).unwrap()).collect();
+            let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+            repo.commit(Some("HEAD"), sig, sig, name, &tree, &parent_refs).unwrap()
+        };
+
+        // Same person, two identities. Use test-only addresses so the developer's GLOBAL
+        // mailmap.file (if configured) can't alias them and perturb the pre-mailmap baseline.
+        let local = git2::Signature::now("Dev", "dev@githud.test").unwrap();
+        let alt = git2::Signature::now("Dev Alt", "alt@githud.test").unwrap();
+        let base = commit_file("a.txt", &local, &[]);
+        commit_file("b.txt", &alt, &[base]);
+
+        // Without a mailmap: two distinct contributors (the reported symptom).
+        let split = super::contributor_stats(dir.to_str().unwrap()).unwrap();
+        assert_eq!(split.len(), 2, "expected two raw identities pre-mailmap: {split:?}");
+
+        // Declare the alt address as an alias of the primary identity.
+        std::fs::write(dir.join(".mailmap"), "Dev <dev@githud.test> <alt@githud.test>\n").unwrap();
+
+        let merged = super::contributor_stats(dir.to_str().unwrap()).unwrap();
+        assert_eq!(merged.len(), 1, "mailmap should collapse the two into one: {merged:?}");
+        assert_eq!(merged[0].commits, 2);
+        assert_eq!(merged[0].author_email, "dev@githud.test");
+        assert_eq!(merged[0].username, "dev");
 
         std::fs::remove_dir_all(&dir).ok();
     }
