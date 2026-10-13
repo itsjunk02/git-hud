@@ -64,22 +64,57 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v0
+      # Enable macOS signing + notarization ONLY when the certificate secret is present.
+      # Tauri's bundler reads APPLE_CERTIFICATE via std::env::var_os, which returns Some("")
+      # for an *empty-but-defined* variable — so it enters the signing path and then fails
+      # `security import` on the empty value. We must therefore leave these vars UNSET for
+      # unsigned builds instead of piping empty `secrets.*` straight into tauri-action's env.
+      - name: Configure macOS code signing
+        if: runner.os == 'macOS'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing + notarization (optional; unsigned if unset)
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows signing (optional; unsigned if unset)
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "::notice::Apple signing secrets found — building SIGNED + notarized macOS artifacts."
+            for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                       APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              printf '%s<<__GH_EOF__\n%s\n__GH_EOF__\n' "$var" "${!var}" >> "$GITHUB_ENV"
+            done
+          else
+            echo "::warning::No APPLE_CERTIFICATE secret — building UNSIGNED macOS artifacts (users will see a Gatekeeper warning on first launch)."
+          fi
+
+      # Same guard for Windows Authenticode signing (empty cert is harmless today, but keep
+      # the structure symmetric so a WINDOWS_CERTIFICATE secret just flows through later).
+      - name: Configure Windows code signing
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$WINDOWS_CERTIFICATE" ]; then
+            echo "::notice::Windows signing secret found — building SIGNED installers."
+            for var in WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD; do
+              printf '%s<<__GH_EOF__\n%s\n__GH_EOF__\n' "$var" "${!var}" >> "$GITHUB_ENV"
+            done
+          else
+            echo "::warning::No WINDOWS_CERTIFICATE secret — building UNSIGNED installers (SmartScreen may warn)."
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signing vars are injected into $GITHUB_ENV by the guarded steps above ONLY when
+          # their secrets exist; otherwise they stay unset and the build is unsigned.
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'git-hud ${{ github.ref_name }}'
-          releaseBody: 'Download the installer for your platform from the assets below.'
+          releaseBody: 'Download the installer for your platform from the assets below. These builds are currently unsigned — see the README “Install” section for first-launch instructions on macOS and Windows.'
           releaseDraft: true
           prerelease: false
