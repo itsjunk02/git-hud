@@ -51,7 +51,7 @@ export function Sidebar({
         <span className="text-sm font-semibold tracking-wide">
           git<span className="text-emerald-400">-hud</span>
         </span>
-        <span className="ml-auto text-[10px] text-zinc-500">v0.1.0</span>
+        <span className="ml-auto text-[10px] text-zinc-500">v0.2.0</span>
       </div>
 
       <div className="flex items-center justify-between px-4 pb-1">

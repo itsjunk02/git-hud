@@ -18,6 +18,29 @@ A background Rust engine parses Git directly through `libgit2` (no shelling out 
 React/Canvas frontend. Browse your history, **stage and commit**, resolve conflicts, and
 drop into a **built-in terminal** — all without leaving the HUD.
 
+## 📥 Install
+
+Grab a pre-built installer — **no toolchain required**.
+
+### [⬇ Download the latest release →](https://github.com/itsjunk02/git-hud/releases/latest)
+
+| OS | Download | Install |
+|----|----------|---------|
+| **macOS** · Apple Silicon | `git-hud_*_aarch64.dmg` | Open the dmg, drag **git-hud** to Applications |
+| **macOS** · Intel | `git-hud_*_x64.dmg` | Open the dmg, drag **git-hud** to Applications |
+| **Windows** | `git-hud_*_x64-setup.exe` (or `_x64_en-US.msi`) | Run the installer |
+| **Linux** · Debian/Ubuntu | `git-hud_*_amd64.deb` | `sudo apt install ./git-hud_*_amd64.deb` |
+| **Linux** · any distro | `git-hud_*_amd64.AppImage` | `chmod +x git-hud_*_amd64.AppImage && ./git-hud_*_amd64.AppImage` |
+
+End users need **nothing** pre-installed — the app is self-contained (the `.deb` pulls its
+`webkit2gtk` runtime as a dependency).
+
+> **Builds are currently unsigned** (code signing + notarization are planned), so your OS warns on first launch:
+> - **macOS** — right-click the app → **Open** (once), or run `xattr -dr com.apple.quarantine /Applications/git-hud.app`.
+> - **Windows** — SmartScreen → **More info** → **Run anyway**.
+
+Prefer to build from source? See **Development** below.
+
 ## 📸 Screenshots
 
 ### Commit & branch timeline
@@ -127,6 +150,8 @@ A real **PTY-backed shell** docked as a collapsible, tabbed bottom panel. Run `g
   DPR-aware HTML5 Canvas for smooth performance on large histories.
 
 ## 📋 Prerequisites
+
+> These are needed only to **build from source**. To just run git-hud, grab an installer from [Install](#-install) above — no toolchain required.
 
 - **Rust** toolchain (stable) — <https://rustup.rs>
 - **Node.js** ≥ 18 and **pnpm** ≥ 8 (`npm i -g pnpm`)

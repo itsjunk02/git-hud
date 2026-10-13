@@ -1,6 +1,6 @@
 [package]
 name = "git-hud"
-version = "0.1.0"
+version = "0.2.0"
 description = "git-hud — a lightweight, high-performance cross-platform Git GUI"
 authors = ["git-hud contributors"]
 license = "MIT"

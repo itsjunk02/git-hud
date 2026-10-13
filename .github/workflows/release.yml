@@ -22,7 +22,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
+        include:
+          - platform: macos-14       # Apple Silicon (arm64) -> git-hud_x.y.z_aarch64.dmg
+          - platform: macos-13       # Intel (x64)           -> git-hud_x.y.z_x64.dmg
+          - platform: ubuntu-22.04   # -> .deb + .AppImage (+ .rpm)
+          - platform: windows-latest # -> .msi + setup .exe (nsis)
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
