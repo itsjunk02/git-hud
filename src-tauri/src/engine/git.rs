@@ -157,14 +157,15 @@ pub fn status(path: &str) -> AppResult<RepoStatus> {
     let mut has_conflicts = false;
     for entry in statuses.iter() {
         let s = entry.status();
-        if s.is_conflicted() {
+        let conflicted = s.is_conflicted();
+        if conflicted {
             has_conflicts = true;
         }
-        let (label, staged) = describe_status(s);
         files.push(FileStatus {
             path: entry.path().unwrap_or_default().to_string(),
-            status: label,
-            staged,
+            index_status: index_status(s),
+            worktree_status: worktree_status(s),
+            conflicted,
         });
     }
 
@@ -184,7 +185,7 @@ pub fn status(path: &str) -> AppResult<RepoStatus> {
 /// branch checked out or no remote-tracking ref to compare against — the caller treats
 /// that as `(0, 0)`. The `behind` count is how "changes made on the web" surface: after a
 /// background fetch, a commit pushed remotely shows up here as `behind: N`.
-fn ahead_behind(repo: &Repository) -> Option<(u32, u32)> {
+pub(crate) fn ahead_behind(repo: &Repository) -> Option<(u32, u32)> {
     let head_ref = repo.head().ok()?;
     if !head_ref.is_branch() {
         return None; // detached HEAD — nothing to track.
@@ -271,34 +272,43 @@ pub fn dco_report(path: &str, limit: usize) -> AppResult<DcoReport> {
     Ok(DcoReport { checked, signed })
 }
 
-/// Map a `git2::Status` bitset to a human label and a "staged?" flag.
-fn describe_status(s: git2::Status) -> (String, bool) {
+/// The staged side (index-vs-HEAD) of a `git2::Status` as a label, or `unmodified`.
+fn index_status(s: git2::Status) -> String {
     use git2::Status as St;
-    let staged = s.intersects(
-        St::INDEX_NEW
-            | St::INDEX_MODIFIED
-            | St::INDEX_DELETED
-            | St::INDEX_RENAMED
-            | St::INDEX_TYPECHANGE,
-    );
-    let label = if s.is_conflicted() {
-        "conflicted"
-    } else if s.intersects(St::INDEX_NEW | St::WT_NEW) {
+    if s.contains(St::INDEX_NEW) {
         "new"
-    } else if s.intersects(St::INDEX_DELETED | St::WT_DELETED) {
+    } else if s.contains(St::INDEX_DELETED) {
         "deleted"
-    } else if s.intersects(St::INDEX_RENAMED | St::WT_RENAMED) {
+    } else if s.contains(St::INDEX_RENAMED) {
         "renamed"
-    } else if s.intersects(St::INDEX_TYPECHANGE | St::WT_TYPECHANGE) {
+    } else if s.contains(St::INDEX_TYPECHANGE) {
         "typechange"
-    } else if s.intersects(St::INDEX_MODIFIED | St::WT_MODIFIED) {
+    } else if s.contains(St::INDEX_MODIFIED) {
         "modified"
-    } else if s.is_ignored() {
-        "ignored"
     } else {
         "unmodified"
-    };
-    (label.to_string(), staged)
+    }
+    .to_string()
+}
+
+/// The unstaged side (worktree-vs-index) of a `git2::Status` as a label, or `unmodified`.
+/// An untracked file surfaces as `new`.
+fn worktree_status(s: git2::Status) -> String {
+    use git2::Status as St;
+    if s.contains(St::WT_NEW) {
+        "new"
+    } else if s.contains(St::WT_DELETED) {
+        "deleted"
+    } else if s.contains(St::WT_RENAMED) {
+        "renamed"
+    } else if s.contains(St::WT_TYPECHANGE) {
+        "typechange"
+    } else if s.contains(St::WT_MODIFIED) {
+        "modified"
+    } else {
+        "unmodified"
+    }
+    .to_string()
 }
 
 #[cfg(test)]

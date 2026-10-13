@@ -77,6 +77,18 @@ export const ipc = {
   fetchNow: (path: string) => unwrap(commands.fetchNow(path)),
   getConfig: (key: string) => unwrap(commands.getConfig(key)),
   setConfig: (key: string, value: string) => unwrap(commands.setConfig(key, value)),
+  // Write operations (stage / unstage / commit).
+  stagePaths: (paths: string[]) => unwrap(commands.stagePaths(paths)),
+  unstagePaths: (paths: string[]) => unwrap(commands.unstagePaths(paths)),
+  commit: (message: string, amend: boolean) => unwrap(commands.commit(message, amend)),
+  // Integrated terminal (PTY). The id is client-generated so the frontend can subscribe to
+  // `pty-output-<id>` before spawning — see TerminalSession.
+  ptySpawn: (id: string, cols: number, rows: number) =>
+    unwrap(commands.ptySpawn(id, cols, rows)),
+  ptyWrite: (id: string, data: string) => unwrap(commands.ptyWrite(id, data)),
+  ptyResize: (id: string, cols: number, rows: number) =>
+    unwrap(commands.ptyResize(id, cols, rows)),
+  ptyKill: (id: string) => unwrap(commands.ptyKill(id)),
 };
 
 /** Event names emitted by the Rust backend (see `src-tauri/src/engine/watcher.rs`). */
@@ -91,3 +103,10 @@ export function onRepoChanged(
 ): Promise<UnlistenFn> {
   return listen<string>(EVENTS.repoChanged, (event) => handler(event.payload));
 }
+
+/**
+ * Per-session terminal event names (backend emits these; see `engine::terminal`). Dynamic
+ * ids mean they're listened to with raw `listen`, exactly like {@link onRepoChanged}.
+ */
+export const ptyOutputEvent = (id: string) => `pty-output-${id}`;
+export const ptyExitEvent = (id: string) => `pty-exit-${id}`;

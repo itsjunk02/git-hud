@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
 
+import { ChangesPanel } from "./components/ChangesPanel";
 import { CollaborationDashboard } from "./components/CollaborationDashboard";
 import { CommitDetail } from "./components/CommitDetail";
 import { CommitTimeline } from "./components/CommitTimeline";
 import { MergeConflictEditor } from "./components/MergeConflictEditor";
 import { Sidebar } from "./components/Sidebar";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { TopBar } from "./components/TopBar";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useCommits } from "./hooks/useCommits";
@@ -17,6 +19,7 @@ import { EVENTS, type CommitInfo } from "./services/tauri-ipc";
 
 const TITLES: Record<View, string> = {
   timeline: "Commit Timeline",
+  changes: "Changes",
   merge: "Merge Conflicts",
   dashboard: "Collaboration",
   settings: "Settings",
@@ -27,6 +30,8 @@ function App() {
     useWorkspace();
   const [view, setView] = useState<View>("timeline");
   const [selected, setSelected] = useState<CommitInfo | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(260);
 
   const { commits, refresh } = useCommits(activePath);
 
@@ -34,6 +39,20 @@ function App() {
   useTauriEvent<string>(EVENTS.repoChanged, () => {
     void refresh();
   });
+
+  // VS Code–style terminal toggle. Capture phase + stopPropagation so it works even when
+  // the terminal has keyboard focus (xterm would otherwise swallow the keystroke).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "`") {
+        e.preventDefault();
+        e.stopPropagation();
+        setTerminalOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   // Switching (or closing) the active project invalidates the selected commit.
   useEffect(() => {
@@ -63,6 +82,8 @@ function App() {
                 repoPath={activePath}
                 live
                 onRefresh={view === "timeline" ? () => void refresh() : undefined}
+                terminalOpen={terminalOpen}
+                onToggleTerminal={() => setTerminalOpen((v) => !v)}
               />
               <div className="flex min-h-0 flex-1">
                 <main className="min-w-0 flex-1">
@@ -73,6 +94,7 @@ function App() {
                       onSelect={setSelected}
                     />
                   )}
+                  {view === "changes" && <ChangesPanel repoPath={activePath} />}
                   {view === "merge" && <MergeConflictEditor repoPath={activePath} />}
                   {view === "dashboard" && <CollaborationDashboard repoPath={activePath} />}
                   {view === "settings" && <SettingsPanel repoPath={activePath} />}
@@ -82,6 +104,13 @@ function App() {
                   <CommitDetail commit={selected} onClose={() => setSelected(null)} />
                 )}
               </div>
+              {terminalOpen && (
+                <TerminalPanel
+                  height={terminalHeight}
+                  onHeightChange={setTerminalHeight}
+                  onClose={() => setTerminalOpen(false)}
+                />
+              )}
             </>
           )}
         </div>
